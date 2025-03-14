@@ -4,8 +4,10 @@
 
 from data.SLP_RD import SLP_RD
 from data.SLP_FD import SLP_FD
+from data.KISS_FD import KISS_FD
 import utils.vis as vis
 import utils.utils as ut
+from utils.utils_ds import get_max_preds
 import numpy as np
 import opt
 import cv2
@@ -30,7 +32,97 @@ else:
 	opts.if_bb = False  #
 exec('from model.{} import get_pose_net'.format(opts.model))  # pose net in
 opts = opt.aug_opts(opts)  # add necesary opts parameters   to it
-# opt.print_options(opts)
+opt.print_options(opts)
+
+def inference(loader, model, ds_rd, opts=None, output_dir='./output/', save_viz=True, n_iter=-1):
+    batch_time = ut.AverageMeter()
+
+    model.eval()
+    preds_hm = []
+    results = []
+    bbs = []
+    skels_idx = ds_rd.skels_idx
+
+    with torch.no_grad():
+        end = time.time()
+        for i, inp_dct in enumerate(loader):
+            input = inp_dct['pch']
+            bb = inp_dct['bb']
+            if i>=n_iter and n_iter>0:
+                break
+            outputs = model(input)
+
+            if isinstance(outputs, list):
+                output = outputs[-1]
+            else:
+                output = outputs
+
+            output_ori = output.clone()
+            num_images = input.size(0)
+            
+            # partially same as accuracy
+            pred, _ = get_max_preds(output.cpu().numpy())  # N x n_jt x 2
+            h, w = output.shape[2], output.shape[3]
+
+            batch_time.update(time.time() - end)
+            end = time.time()
+            
+            # keep rst
+            preds_hm.append(pred)
+            bbs.append(bb.numpy())
+            
+            try:
+                sv_dir = opts.vis_test_dir
+                # 모달리티 정보 가져오기
+                mod0 = opts.mod_src[0]
+                
+                # 채널 평균 및 표준편차 확인
+                if 'RGB' in mod0:
+                    mean = [0.609, 0.609, 0.609] 
+                    std = [0.144, 0.144, 0.144]
+                else:
+                    # mean = ds_rd.means[mod0]
+                    # std = ds_rd.stds[mod0]
+                    mean = [0.609, 0.609, 0.609] 
+                    std = [0.144, 0.144, 0.144]                   
+                
+                # 배치 내 모든 이미지를 처리하기 위해 수정
+                for b_idx in range(input.size(0)):  # 배치의 각 이미지에 대해 반복
+                    
+                    img_patch_vis = ut.ts2cv2(input[b_idx], mean, std)
+                    if hasattr(ds_rd, 'dct_clrMap') and mod0 in ds_rd.dct_clrMap:
+                        cm = getattr(cv2, ds_rd.dct_clrMap[mod0])
+                        img_patch_vis = cv2.applyColorMap(img_patch_vis, cm)
+                    elif 'RGB' not in mod0:
+                        img_patch_vis = cv2.applyColorMap(img_patch_vis, cv2.COLORMAP_JET)
+
+                    # 인덱스 수정 (배치 내 위치 반영)
+                    idx_test = i * opts.batch_size + b_idx  # image index
+                    
+                    if skels_idx is not None:
+                        pred2d_patch = np.ones((14, 3))
+                        pred2d_patch[:, :2] = pred[b_idx] / opts.out_shp[0] * opts.sz_pch[1]
+                        vis.save_2d_skels(img_patch_vis, pred2d_patch, skels_idx, sv_dir, suffix='-'+mod0, idx=idx_test)
+                    else:
+                        vis.save_img(img_patch_vis, sv_dir, idx_test, sub=mod0)
+            except Exception as e:
+                print(f"시각화 중 오류 발생: {e}")
+                # 시각화 오류가 발생해도 추론은 계속 진행
+
+            if i % opts.print_freq == 0:
+                msg = f'Test: [{i}/{len(loader)}]\tTime {batch_time.val:.3f}s ({batch_time.avg:.3f}s)'
+                print(msg)
+
+        # 모든 예측 결과 수집
+        all_preds = []
+        for i, pred in enumerate(preds_hm):
+            result = {
+                "frame_idx": i,
+                "predictions": pred.tolist()
+            }
+            all_preds.append(result)
+
+    return all_preds
 
 def train(loader, ds_rd, model, criterion, optimizer, epoch, n_iter=-1, logger=None, opts=None, visualizer=None):
 	'''
@@ -240,9 +332,14 @@ def validate(loader, ds_rd, model, criterion, n_iter=-1, logger=None, opts=None,
 				img_patch_vis = ut.ts2cv2(input[0], mean, std) # to CV BGR
 				img_patch_vis_flipped = ut.ts2cv2(input_flipped[0], mean, std) # to CV BGR
 				# pseudo change
-				cm = getattr(cv2,ds_rd.dct_clrMap[mod0])
-				img_patch_vis = cv2.applyColorMap(img_patch_vis, cm)
-				img_patch_vis_flipped = cv2.applyColorMap(img_patch_vis_flipped, cm)
+				if hasattr(ds_rd, 'dct_clrMap') and mod0 in ds_rd.dct_clrMap:
+					cm = getattr(cv2, ds_rd.dct_clrMap[mod0])
+					img_patch_vis = cv2.applyColorMap(img_patch_vis, cm)
+				else:
+					# RGB 이미지는 컬러맵을 적용하지 않음
+					if 'RGB' not in mod0 and (len(img_patch_vis.shape) == 2 or img_patch_vis.shape[2] == 1):
+						# 그레이스케일 이미지에는 기본 컬러맵 적용
+						img_patch_vis_flipped = cv2.applyColorMap(img_patch_vis_flipped, cm)
 
 				# original version get img from the ds_rd , different size , plot ing will vary from each other
 				# warp preds to ori
@@ -324,12 +421,65 @@ def main():
 	SLP_rd_train = SLP_RD(opts, phase='train')  # all test result
 	SLP_fd_train = SLP_FD(SLP_rd_train, opts, phase='train', if_sq_bb=True)
 	train_loader = DataLoader(dataset=SLP_fd_train, batch_size= opts.batch_size // len(opts.trainset),
-	                    shuffle=True, num_workers=opts.n_thread, pin_memory=opts.if_pinMem)
+						shuffle=True, num_workers=opts.n_thread, pin_memory=opts.if_pinMem)
 
 	SLP_rd_test = SLP_RD(opts, phase=opts.test_par)  # all test result      # can test against all controled in opt
 	SLP_fd_test = SLP_FD(SLP_rd_test,  opts, phase='test', if_sq_bb=True)
 	test_loader = DataLoader(dataset=SLP_fd_test, batch_size = opts.batch_size // len(opts.trainset),
-	                          shuffle=False, num_workers=opts.n_thread, pin_memory=opts.if_pinMem)
+							  shuffle=False, num_workers=opts.n_thread, pin_memory=opts.if_pinMem)
+
+	if opts.if_inference:
+
+		KISS_fd_test = KISS_FD(SLP_rd_test, opts, phase='inference', id=opts.id)
+		inf_loader = DataLoader(dataset=KISS_fd_test, batch_size=opts.batch_size // len(opts.trainset),
+								  shuffle=False, num_workers=opts.n_thread, pin_memory=opts.if_pinMem)
+		model = get_pose_net(in_ch=opts.input_nc, out_ch=n_jt)  # get model
+		logger.info(">>> 추론 모드로 실행합니다.")
+
+		# 모델 로드
+		checkpoint_file = opts.checkpoint_path if hasattr(opts, 'checkpoint_path') and opts.checkpoint_path \
+			else os.path.join(opts.model_dir, 'checkpoint.pth')
+
+		if path.exists(checkpoint_file):
+			logger.info("=> 체크포인트 로드 중: '{}'".format(checkpoint_file))
+			checkpoint = torch.load(checkpoint_file)
+			model.load_state_dict(checkpoint['state_dict'])
+			logger.info("=> 체크포인트 로드 완료: '{}' (epoch {})".format(
+				checkpoint_file, checkpoint['epoch'] if 'epoch' in checkpoint else 'unknown'))
+		else:
+			logger.error(f"체크포인트 파일을 찾을 수 없습니다: {checkpoint_file}")
+			return
+
+		# GPU로 모델 이동
+		model = torch.nn.DataParallel(model, device_ids=opts.gpu_ids).cuda()
+		model.eval()
+
+		# 출력 디렉토리 설정
+		output_dir = opts.output_dir if hasattr(opts, 'output_dir') and opts.output_dir else './output'
+
+		try:
+			results = inference(
+				loader=inf_loader,
+				model=model,
+				ds_rd=SLP_rd_test,
+				opts=opts,
+				output_dir=output_dir,
+				save_viz=True
+			)
+
+			# 결과 저장
+			result_file = os.path.join(output_dir, "results.json")
+			with open(result_file, 'w') as f:
+				json.dump(results, f, indent=2)
+
+			logger.info(f"추론 결과가 {output_dir}에 저장되었습니다.")
+			logger.info(f"총 {len(results)}개의 이미지 처리 완료")
+
+		except Exception as e:
+			logger.error(f"추론 중 오류 발생: {str(e)}")
+			return
+
+		return
 
 	# for visualzier
 	if opts.display_id > 0:

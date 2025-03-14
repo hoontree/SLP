@@ -212,6 +212,30 @@ def diagnose_network(net, name='network'):
 		mean = mean / count
 	print(name)
 	print(mean)
+ 
+ # 텐서에서 OpenCV 이미지로 변환 개선
+def improved_ts2cv2(tensor, mean, std):
+    # 0. 텐서를 복제하여 원본 데이터 유지
+    img = tensor.clone().detach().cpu().numpy()
+    
+    # 1. 채널 순서 변경 (C,H,W) -> (H,W,C)
+    if img.shape[0] == 3 or img.shape[0] == 1:  # 채널이 첫 번째 차원인 경우
+        img = np.transpose(img, (1, 2, 0))
+    
+    # 2. 정규화 해제 (mean, std 적용 역전)
+    for i in range(img.shape[2]):
+        img[:, :, i] = img[:, :, i] * std[i] + mean[i]
+    
+    # 3. 0~255 범위로 스케일링
+    img = np.clip(img * 255.0, 0, 255).astype(np.uint8)
+    
+    # 4. 채널 수 확인 및 처리
+    if img.shape[2] == 1:  # 그레이스케일 이미지
+        img = img[:, :, 0]  # 단일 채널로 변환
+    elif img.shape[2] == 3:  # RGB 이미지
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # RGB -> BGR (OpenCV 형식)
+    
+    return img
 
 def ts2cv2(img_ts, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
 	'''
@@ -546,22 +570,38 @@ def adj_bb(bb, rt_xy=1):
 	:param rt_xy:
 	:return:
 	'''
-	bb_n = bb.copy()
-	w = bb[2]
-	h = bb[3]
-	c_x = bb[0] + w / 2.
-	c_y = bb[1] + h / 2.
-	aspect_ratio =rt_xy
-	if w > aspect_ratio * h:
-		h = w / aspect_ratio
-	elif w < aspect_ratio * h:
-		w = h * aspect_ratio
-	bb_n[2] = w
-	bb_n[3] = h
-	bb_n[0] = c_x - w / 2.
-	bb_n[1] = c_y - h / 2.
+	# bb_n = bb.copy()
+	# w = bb[2]
+	# h = bb[3]
+	# c_x = bb[0] + w / 2.
+	# c_y = bb[1] + h / 2.
+	# aspect_ratio =rt_xy
+	# if w > aspect_ratio * h:
+	# 	h = w / aspect_ratio
+	# elif w < aspect_ratio * h:
+	# 	w = h * aspect_ratio
+	# bb_n[2] = w
+	# bb_n[3] = h
+	# bb_n[0] = c_x - w / 2.
+	# bb_n[1] = c_y - h / 2.
 
-	return np.array(bb_n)
+	# return np.array(bb_n)
+	max_dim = max(bb[2], bb[3])
+    
+    # 이미지의 중심점 계산
+	img_center_x = bb[2] / 2
+	img_center_y = bb[3] / 2
+    
+    # 바운딩 박스 생성
+	square_bb = np.zeros(4)
+	square_bb[2] = max_dim  # 너비 = 최대 차원
+	square_bb[3] = max_dim  # 높이 = 최대 차원
+
+	# 중심점 기준으로 위치 조정
+	square_bb[0] = img_center_x - max_dim / 2  # 왼쪽 좌표
+	square_bb[1] = img_center_y - max_dim / 2  # 상단 좌표
+
+	return np.array(square_bb)
 
 
 class Timer(object):
