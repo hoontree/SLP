@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python 디버거: 인수가 있는 현재 파일",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "console": "integratedTerminal",
+            // "args": [
+            //     "--if_test"
+            // ]
+            "args": [
+                "--if_inference",
+                "--id", "A2019-EM-01-0008"
+            ],
+        }
+    ]
+}

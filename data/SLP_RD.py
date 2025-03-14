@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 cov_dict={'uncover': 0, 'cover1': 1, 'cover2': 2}
 
-def getImg_dsPM(dsFd=r'G:\My Drive\ACLab Shared GDrive\datasetPM\danaLab', idx_subj=1, modality='IR', cov='uncover',
+def getImg_dsPM(dsFd=r'/tf/02_code/SLP-Dataset-and-Code/data/SLP/danaLab', idx_subj=1, modality='IR', cov='uncover',
                 idx_frm=1):
 	'''
 	directly get image or array in raw format.
@@ -56,7 +56,7 @@ def uni_mod(mod):
 	return mod
 
 
-def genPTr_dict(subj_li, mod_li, dsFd=r'G:\My Drive\ACLab Shared GDrive\datasetPM\danaLab'):
+def genPTr_dict(subj_li, mod_li, dsFd=r'/tf/02_code/SLP-Dataset-and-Code/data/SLP/danaLab'):
 	'''
 	loop idx_li, loop mod_li then generate dictionary {mod[0]:PTr_li[...], mod[1]:PTr_li[...]}
 	history: 6/3/20: add 'PM' as eye matrix for simplicity

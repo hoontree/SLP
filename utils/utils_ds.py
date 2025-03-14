@@ -41,6 +41,68 @@ def get_aug_config():
 
 	return scale, rot, do_flip, color_scale, do_occlusion
 
+def generate_patch_image_no_bbox(cvimg, do_flip, scale, rot, do_occlusion, input_shape=(256, 256)):
+    # 이미지 복사
+    img = cvimg.copy()
+    img_height, img_width, img_channels = img.shape
+    
+    # bbox 대신 전체 이미지를 사용
+    # 이미지 중심점 계산
+    c_x = img_width / 2
+    c_y = img_height / 2
+    
+    # 이미지 크기 사용 (전체 이미지를 관심 영역으로)
+    img_width_float = float(img_width)
+    img_height_float = float(img_height)
+    
+    # 가려짐(occlusion) 처리 (필요한 경우)
+    if do_occlusion:
+        # 전체 이미지 크기에 기반한 랜덤 영역 생성
+        area_min = 0.0
+        area_max = 0.3  # 더 작은 비율로 조정
+        synth_area = (random.random() * (area_max - area_min) + area_min) * img_width * img_height
+        
+        ratio_min = 0.3
+        ratio_max = 1 / 0.3
+        synth_ratio = (random.random() * (ratio_max - ratio_min) + ratio_min)
+        
+        synth_h = math.sqrt(synth_area * synth_ratio)
+        synth_w = math.sqrt(synth_area / synth_ratio)
+        synth_xmin = random.random() * (img_width - synth_w - 1)
+        synth_ymin = random.random() * (img_height - synth_h - 1)
+        
+        if synth_xmin >= 0 and synth_ymin >= 0 and synth_xmin + synth_w < img_width and synth_ymin + synth_h < img_height:
+            xmin = int(synth_xmin)
+            ymin = int(synth_ymin)
+            w = int(synth_w)
+            h = int(synth_h)
+            img[ymin:ymin + h, xmin:xmin + w, :] = np.random.rand(h, w, img_channels) * 255
+    
+    # 이미지 뒤집기
+    if do_flip:
+        img = img[:, ::-1, :]
+        c_x = img_width - c_x - 1  # 중심점 뒤집기
+    
+    # 변환 행렬 생성
+    trans = gen_trans_from_patch_cv(
+        c_x, c_y, 
+        img_width_float, img_height_float,  # 소스 크기
+        input_shape[1], input_shape[0],     # 목표 크기
+        scale, rot, inv=False
+    )
+    
+    # 아핀 변환 적용
+    img_patch = cv2.warpAffine(
+        img, trans, 
+        (int(input_shape[1]), int(input_shape[0])),
+        flags=cv2.INTER_LINEAR
+    )
+    
+    img_patch = img_patch.astype(np.float32)
+    img_patch = np.transpose(img_patch, (2, 0, 1))
+    
+    return img_patch, trans
+
 
 def generate_patch_image(cvimg, bbox, do_flip, scale, rot, do_occlusion, input_shape=(256, 256)):
 	# return skimage RGB,  h,w,c
@@ -214,7 +276,8 @@ def get_max_preds(batch_heatmaps):
 	'''
 	get predictions from score maps
 	heatmaps: numpy.ndarray([batch_size, num_joints, height, width])
-	:return preds [N x n_jt x 2]
+	generally ([batch_size, 14, 64, 64])
+	:return preds [N x n_jt x 2] ex) [N x 14 x 2] (x, y) for each joint
 	'''
 	assert isinstance(batch_heatmaps, np.ndarray), \
 		'batch_heatmaps should be numpy.ndarray'

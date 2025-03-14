@@ -11,9 +11,9 @@ def parseArgs(if_redef=True):
 	parser = configargparse .ArgumentParser(formatter_class=configargparse .ArgumentDefaultsHelpFormatter)
 
 	# -- env settings
-	parser.add_argument('--ds_fd', default='/scratch/liu.shu/datasets',
+	parser.add_argument('--ds_fd', default='/tf/02_code/SLP-Dataset-and-Code/data',
 		                    help='dataset directionry')  # for discovery
-	parser.add_argument('--output_dir', default='output', help='default output dirs')  # code local.
+	parser.add_argument('--output_dir', default='/tf/02_code/SLP-Dataset-and-Code/checkpoints', help='default output dirs')  # code local.
 	parser.add('--modelConf', default='config/HRpose.conf', is_config_file=True, help='Path to config file')
 	parser.add_argument('--ifb_debug', action='store_true')
 	parser.add_argument('--suffix_ptn_train', default='{model}')
@@ -25,7 +25,7 @@ def parseArgs(if_redef=True):
 	# -- data setting
 	parser.add_argument('--prep', default='SLP_A2J', help='data preparation method')
 	parser.add_argument('--SLP_set', default='danaLab', help='[danaLab|simLab] for SLP section')
-	parser.add_argument('--mod_src', nargs='+', default=['IR'],
+	parser.add_argument('--mod_src', nargs='+', default=['RGB'],
 	                    help='source modality list, can accept multiple modalities typical model [RGB|IR|depthRaw| PMarray]')
 	parser.add_argument('--cov_li', nargs='+', default=['uncover', 'cover1', 'cover2'], help='the cover conditions')
 	parser.add_argument('--fc_depth', type=float, default=50., help='the depth factor to pixel level')
@@ -38,13 +38,14 @@ def parseArgs(if_redef=True):
 	                    help='backbone net type [res50|res101|res152], can extended to VGG different layers, not so important , add later')
 	parser.add_argument('--out_shp', default=(64, 64, -1), type=int, nargs='+',
 		                    help='the output(hm) size of the network, last dim is optional for 3d case')
+	parser.add_argument('--id', default='A2019-EM-01-0008', help='the id of the subject to be tested')
 
 	# -- train setting
 	parser.add_argument('--trainset', nargs='+', default=['SLP'],
 	                    help='give the main ds here the iter number will follow this one')  # to mod later
 	# parser.add_argument('--if_D', default='y', help='if use discriminator, if single ds, then automatically set to n')
 	parser.add_argument('--sz_pch', nargs='+', default=(256, 256), type=int, help='input image size, model 288, pix2pix 256')
-	parser.add_argument('--end_epoch', default=100, type=int,
+	parser.add_argument('--end_epoch', default=20, type=int,
 	                    help='when reach this epoch, will stop. python index style, your model will be saved as epoch_tar-1, ori 25 ')
 	parser.add_argument('--epoch_step', default=-1, type=int,
 	                    help='mainly for time constrained system, each time only train step epoches, -1 for all')
@@ -107,6 +108,13 @@ def parseArgs(if_redef=True):
 	parser.add_argument('--svVis_step', default=1, type=int, help='step to save visuals')
 	parser.add_argument('--test_par', default='test',
 	                    help='the exact test portion, could be [testInLoop|test|train|all], can use the model to test on train set or test set')  # I just save default first
+	parser.add_argument('--input_mod', default='RGB',
+	                    help='the input modality for test, if not given, use the first one in mod_src')
+	parser.add_argument('--ckpt_mod', default='RGB',
+	                    help='the input modality for test, if not given, use the first one in mod_src')
+	parser.add_argument('--if_inference', action='store_true',
+	                    help='if use inference mode, no need to save the intermediate results, only save the final result')
+	parser.add_argument('--data_dir', default='/tf/02_code/SLP-Dataset-and-Code/data', help='the data directory, if not given, use the default one in the code')
 
 	opts, _ = parser.parse_known_args()  # all cmd infor
 
